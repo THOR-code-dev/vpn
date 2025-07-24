@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server/index.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "dist/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/server/index.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      }
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/dist/$1"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "NEXT_PUBLIC_API_URL": "https://viralvpn-77rh6r7l1-omers-projects-7df536e6.vercel.app",
+    "ADMIN_USERNAME": "admin",
+    "ADMIN_PASSWORD": "admin123",
+    "JWT_SECRET": "viralvpn-super-secure-jwt-secret-key-2024"
+  }
+} 

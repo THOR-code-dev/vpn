@@ -1,4 +1,4 @@
-rootProject.name = 'SecureVPN'
+rootProject.name = 'viralvpn'
 
 dependencyResolutionManagement {
   versionCatalogs {

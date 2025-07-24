@@ -49,7 +49,7 @@ export default function PurchaseScreen() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.logoContainer}>
           <Text style={{ fontSize: 80, color: '#3B82F6' }}>🛡️</Text>
-          <Text style={styles.logoText}>SecureVPN</Text>
+          <Text style={styles.logoText}>viralvpn</Text>
         </View>
         
         <Text style={styles.description}>

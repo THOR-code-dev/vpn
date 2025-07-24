@@ -1,12 +1,20 @@
-import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getApiUrl, API_ENDPOINTS } from '../src/config/api';
 
-// Base API URL
-const API_BASE_URL = 'http://localhost:3000/api';
+export interface LicenseValidationResponse {
+  status: 'valid' | 'invalid' | 'error';
+  message?: string;
+  user?: string;
+  remainingDays?: number;
+  servers?: any[];
+}
 
-export const validateLicense = async (licenseKey: string): Promise<any> => {
+export interface CheckoutSessionResponse {
+  sessionId: string;
+}
+
+export const validateLicense = async (licenseKey: string): Promise<LicenseValidationResponse> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/validate-license`, {
+    const response = await fetch(getApiUrl(API_ENDPOINTS.validateLicense), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -15,35 +23,27 @@ export const validateLicense = async (licenseKey: string): Promise<any> => {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'License validation failed');
+      const errorData = await response.json();
+      return {
+        status: 'invalid',
+        message: errorData.message || 'License validation failed'
+      };
     }
 
     const data = await response.json();
-    
-    if (data.status === 'valid') {
-      // Store license data
-      await AsyncStorage.setItem('vpn_license', licenseKey);
-      await AsyncStorage.setItem('vpn_servers', JSON.stringify(data.servers));
-      await AsyncStorage.setItem('vpn_expiry', data.remainingDays.toString());
-      
-      return {
-        status: 'valid',
-        remaining_days: data.remainingDays,
-        available_servers: data.servers,
-      };
-    } else {
-      throw new Error(data.message || 'Invalid license');
-    }
-  } catch (error: any) {
+    return data;
+  } catch (error) {
     console.error('License validation error:', error);
-    throw error;
+    return {
+      status: 'error',
+      message: 'Network error occurred'
+    };
   }
 };
 
-export const createLicense = async (): Promise<any> => {
+export const createCheckoutSession = async (): Promise<CheckoutSessionResponse | null> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/create-checkout-session`, {
+    const response = await fetch(getApiUrl(API_ENDPOINTS.createCheckoutSession), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -57,7 +57,7 @@ export const createLicense = async (): Promise<any> => {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error('License creation error:', error);
-    throw error;
+    console.error('Checkout session creation error:', error);
+    return null;
   }
 };

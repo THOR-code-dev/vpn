@@ -1,54 +1,74 @@
 require('dotenv').config();
 const express = require('express');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { v4: uuidv4 } = require('uuid');
-const fs = require('fs/promises');
-const path = require('path');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const port = process.env.PORT || 3000;
 const cors = require('cors');
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
 
-// Database simulation
-const DB_PATH = path.join(__dirname, 'data', 'licenses.json');
+// Admin credentials
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
-// Ensure data directory and file exist
-async function initializeDatabase() {
-  try {
-    await fs.mkdir(path.join(__dirname, 'data'), { recursive: true });
-    try {
-      await fs.access(DB_PATH);
-    } catch {
-      await fs.writeFile(DB_PATH, JSON.stringify({ licenses: [] }));
-    }
-  } catch (error) {
-    console.error('Error initializing database:', error);
-  }
+// Stripe setup - only if API key is provided
+let stripe = null;
+if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_SECRET_KEY !== 'sk_test_mock_key_for_development') {
+  stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 }
 
-// Read licenses from JSON file
-async function getLicenses() {
-  try {
-    const data = await fs.readFile(DB_PATH, 'utf8');
-    return JSON.parse(data).licenses;
-  } catch (error) {
-    console.error('Error reading licenses:', error);
-    return [];
+// In-memory database for Vercel serverless
+let licenses = [
+  {
+    id: '1',
+    key: 'DEMO-1234-5678-9ABC',
+    email: 'demo@viralvpn.net',
+    status: 'active',
+    expiryDate: '2025-12-31T23:59:59.000Z',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    plan: 'monthly',
+    price: 9.99
+  },
+  {
+    id: '2', 
+    key: 'TEST-ABCD-EFGH-IJKL',
+    email: 'test@viralvpn.net',
+    status: 'active',
+    expiryDate: '2025-08-31T23:59:59.000Z',
+    createdAt: '2024-07-01T00:00:00.000Z',
+    plan: 'monthly',
+    price: 9.99
   }
-}
+];
 
-// Write licenses to JSON file
-async function saveLicenses(licenses) {
-  try {
-    await fs.writeFile(DB_PATH, JSON.stringify({ licenses }, null, 2));
-  } catch (error) {
-    console.error('Error saving licenses:', error);
+let users = [
+  {
+    id: '1',
+    email: 'demo@viralvpn.net',
+    name: 'Demo User',
+    licenseKey: 'DEMO-1234-5678-9ABC',
+    status: 'active',
+    createdAt: '2024-01-01T00:00:00.000Z'
+  },
+  {
+    id: '2',
+    email: 'test@viralvpn.net', 
+    name: 'Test User',
+    licenseKey: 'TEST-ABCD-EFGH-IJKL',
+    status: 'active',
+    createdAt: '2024-07-01T00:00:00.000Z'
   }
-}
+];
 
 // Generate a random license key
 function generateLicenseKey() {
@@ -65,32 +85,66 @@ function generateLicenseKey() {
 const VPN_SERVERS = [
   {
     id: '1',
-    country: 'United States',
     name: 'US East',
+    country: 'United States',
+    city: 'New York',
+    ip: 'us-east.example.com',
+    port: 8388,
+    status: 'online',
     speed: 'high',
+    users: 15,
+    maxUsers: 100,
+    bandwidth: 1024 * 1024 * 1024, // 1 GB
+    isActive: true,
     accessKey: 'ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@us-east.example.com:8388/?outline=1'
   },
   {
     id: '2',
-    country: 'Germany',
     name: 'Frankfurt',
+    country: 'Germany',
+    city: 'Frankfurt',
+    ip: 'de-frankfurt.example.com',
+    port: 8388,
+    status: 'online',
     speed: 'high',
+    users: 8,
+    maxUsers: 100,
+    bandwidth: 1024 * 1024 * 1024, // 1 GB
+    isActive: true,
     accessKey: 'ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@de-frankfurt.example.com:8388/?outline=1'
   },
   {
     id: '3',
-    country: 'Japan',
     name: 'Tokyo',
+    country: 'Japan',
+    city: 'Tokyo',
+    ip: 'jp-tokyo.example.com',
+    port: 8388,
+    status: 'online',
     speed: 'medium',
+    users: 12,
+    maxUsers: 100,
+    bandwidth: 1024 * 1024 * 1024, // 1 GB
+    isActive: true,
     accessKey: 'ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@jp-tokyo.example.com:8388/?outline=1'
   }
 ];
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'ViralVPN API is running',
+    timestamp: new Date().toISOString(),
+    licenses: licenses.length,
+    users: users.length
+  });
+});
 
 // Validate license endpoint
 app.post('/api/validate-license', async (req, res) => {
   try {
     const { licenseKey } = req.body;
-    const licenses = await getLicenses();
     const license = licenses.find(l => l.key === licenseKey);
 
     if (!license) {
@@ -130,6 +184,13 @@ app.post('/api/validate-license', async (req, res) => {
 // Create Stripe checkout session
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
+    if (!stripe) {
+      return res.status(501).json({
+        status: 'error',
+        message: 'Stripe integration is not enabled.'
+      });
+    }
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -162,6 +223,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
 
 // Stripe webhook handler
 app.post('/api/webhook', async (req, res) => {
+  if (!stripe) {
+    return res.status(501).send('Stripe webhook handler is not enabled.');
+  }
+
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -193,9 +258,7 @@ app.post('/api/webhook', async (req, res) => {
     };
 
     // Save to database
-    const licenses = await getLicenses();
     licenses.push(newLicense);
-    await saveLicenses(licenses);
 
     // Update Stripe metadata with license key
     await stripe.checkout.sessions.update(session.id, {
@@ -206,9 +269,235 @@ app.post('/api/webhook', async (req, res) => {
   res.json({ received: true });
 });
 
+// Admin API endpoints
+app.get('/api/servers', async (req, res) => {
+  try {
+    res.json(VPN_SERVERS);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch servers' });
+  }
+});
+
+app.post('/api/servers', async (req, res) => {
+  try {
+    const newServer = {
+      id: Date.now().toString(),
+      ...req.body,
+      status: 'online',
+      users: 0,
+      bandwidth: 0,
+    };
+    VPN_SERVERS.push(newServer);
+    res.json(newServer);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create server' });
+  }
+});
+
+app.put('/api/servers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const serverIndex = VPN_SERVERS.findIndex(s => s.id === id);
+    if (serverIndex === -1) {
+      return res.status(404).json({ error: 'Server not found' });
+    }
+    VPN_SERVERS[serverIndex] = { ...VPN_SERVERS[serverIndex], ...req.body };
+    res.json(VPN_SERVERS[serverIndex]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update server' });
+  }
+});
+
+app.delete('/api/servers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const serverIndex = VPN_SERVERS.findIndex(s => s.id === id);
+    if (serverIndex === -1) {
+      return res.status(404).json({ error: 'Server not found' });
+    }
+    VPN_SERVERS.splice(serverIndex, 1);
+    res.json({ message: 'Server deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete server' });
+  }
+});
+
+app.get('/api/licenses', async (req, res) => {
+  try {
+    res.json(licenses);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch licenses' });
+  }
+});
+
+app.post('/api/licenses', async (req, res) => {
+  try {
+    const { email, expiryDate } = req.body;
+    const licenseKey = generateLicenseKey();
+    
+    const newLicense = {
+      id: uuidv4(),
+      key: licenseKey,
+      email,
+      createdAt: new Date().toISOString(),
+      expiryDate,
+      status: 'active'
+    };
+
+    licenses.push(newLicense);
+    
+    res.json(newLicense);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create license' });
+  }
+});
+
+app.put('/api/licenses/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const licenseIndex = licenses.findIndex(l => l.id === id);
+    
+    if (licenseIndex === -1) {
+      return res.status(404).json({ error: 'License not found' });
+    }
+    
+    licenses[licenseIndex] = { ...licenses[licenseIndex], ...req.body };
+    
+    res.json(licenses[licenseIndex]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update license' });
+  }
+});
+
+app.delete('/api/licenses/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('Lisans silme isteği:', { id });
+    
+    const licenseIndex = licenses.findIndex(l => l.id === id);
+    
+    if (licenseIndex === -1) {
+      console.log('Lisans bulunamadı');
+      return res.status(404).json({ error: 'License not found' });
+    }
+    
+    const deletedLicense = licenses[licenseIndex];
+    licenses.splice(licenseIndex, 1);
+    
+    console.log('Lisans silindi:', deletedLicense);
+    res.json({ message: 'License deleted', deletedLicense });
+  } catch (error) {
+    console.error('Lisans silme hatası:', error);
+    res.status(500).json({ error: 'Failed to delete license' });
+  }
+});
+
+app.get('/api/users', async (req, res) => {
+  try {
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const newUser = {
+      id: uuidv4(), // Use uuidv4 for new users
+      ...req.body,
+      lastLogin: new Date().toISOString(),
+      totalUsage: 0,
+      status: 'active'
+    };
+    users.push(newUser);
+    res.json(newUser);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userIndex = users.findIndex(u => u.id === id);
+    
+    if (userIndex === -1) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    users[userIndex] = { ...users[userIndex], ...req.body };
+    
+    res.json(users[userIndex]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userIndex = users.findIndex(u => u.id === id);
+    
+    if (userIndex === -1) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    users.splice(userIndex, 1);
+    
+    res.json({ message: 'User deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const settings = {
+      appName: 'viralvpn',
+      version: '1.0.0',
+      maintenanceMode: false,
+      maxConnectionsPerUser: 1,
+      defaultLicenseDuration: 30, // days
+      stripeEnabled: true,
+      outlineApiEnabled: true
+    };
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+app.put('/api/settings', async (req, res) => {
+  try {
+    // Mock update - gerçek uygulamada ayarlar dosyasında güncellenecek
+    res.json({ message: 'Settings updated', ...req.body });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '2h' });
+    return res.json({ token });
+  }
+  res.status(401).json({ error: 'Geçersiz kullanıcı adı veya şifre' });
+});
+
+app.post('/api/admin/verify', (req, res) => {
+  const { token } = req.body;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    res.json({ valid: true, user: decoded });
+  } catch (e) {
+    res.status(401).json({ valid: false });
+  }
+});
+
 // Initialize database and start server
-initializeDatabase().then(() => {
+// initializeDatabase().then(() => { // This line is removed as per the new_code
   app.listen(port, () => {
     console.log(`Server running on port ${port}`);
   });
-});
+// });

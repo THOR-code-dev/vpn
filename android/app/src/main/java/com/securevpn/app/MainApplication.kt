@@ -1,4 +1,4 @@
-package com.securevpn.app
+package com.viralvpn.app
 
 import android.app.Application
 import android.content.res.Configuration

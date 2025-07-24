@@ -4,11 +4,13 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 // import { Shield } from '../components/Icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Link } from 'expo-router';
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [hasLicense, setHasLicense] = useState(false);
+  const [isConnected, setIsConnected] = useState(false); // Added for the new button
 
   console.log('WelcomeScreen render ediliyor');
 
@@ -40,6 +42,10 @@ export default function WelcomeScreen() {
     router.push('/purchase');
   };
 
+  const handleConnect = () => {
+    setIsConnected(!isConnected);
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -54,7 +60,7 @@ export default function WelcomeScreen() {
       <View style={styles.content}>
         <View style={styles.logoContainer}>
           <Text style={styles.logoIcon}>🛡️</Text>
-          <Text style={styles.logoText}>SecureVPN</Text>
+          <Text style={styles.logoText}>viralvpn</Text>
         </View>
         
         <Text style={styles.subtitle}>Hızlı, güvenli ve özel VPN hizmeti</Text>
@@ -83,6 +89,16 @@ export default function WelcomeScreen() {
             onPress={handlePurchase}
           >
             <Text style={styles.buttonTextSecondary}>Lisans satın al</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.button} onPress={handleConnect}>
+            <Text style={styles.buttonText}>
+              {isConnected ? 'Bağlantıyı Kes' : 'Bağlan'}
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={[styles.button, styles.adminButton]} onPress={() => router.push('admin' as any)}>
+            <Text style={styles.buttonText}>Admin Panel</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -156,5 +172,13 @@ const styles = StyleSheet.create({
     color: '#3B82F6',
     fontSize: 16,
     fontWeight: '600',
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  adminButton: {
+    backgroundColor: '#4F46E5', // A different color for admin button
   },
 });
