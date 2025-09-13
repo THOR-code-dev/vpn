@@ -2,8 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { connectVPN, disconnectVPN } from '../api/vpnAPI';
 import { checkLicenseAndLogout, checkLicenseOnFocus, startLicenseMonitoring } from '../src/services/licenseChecker';
+
+// VPN API functions
+const connectVPN = async (accessKey: string) => {
+  // Simulated connection - in real app this would connect to VPN
+  console.log('Connecting to VPN with access key:', accessKey);
+  await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate connection delay
+  return {
+    success: true,
+    ip: '192.168.1.' + Math.floor(Math.random() * 254 + 1) // Random IP
+  };
+};
+
+const disconnectVPN = async () => {
+  // Simulated disconnection
+  console.log('Disconnecting from VPN');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  return { success: true };
+};
 
 type Server = {
   id: string;
