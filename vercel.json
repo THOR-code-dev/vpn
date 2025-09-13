@@ -27,7 +27,6 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "NEXT_PUBLIC_API_URL": "https://viralvpn-77rh6r7l1-omers-projects-7df536e6.vercel.app",
     "ADMIN_USERNAME": "admin",
     "ADMIN_PASSWORD": "admin123",
     "JWT_SECRET": "viralvpn-super-secure-jwt-secret-key-2024"

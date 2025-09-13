@@ -5,10 +5,10 @@ export const API_CONFIG = {
     baseURL: 'http://localhost:3000',
     apiURL: 'http://localhost:3000/api'
   },
-  // Production - Vercel
+  // Production - Vercel (dynamic URL)
   production: {
-    baseURL: process.env.NEXT_PUBLIC_API_URL || 'https://viralvpn.net',
-    apiURL: `${process.env.NEXT_PUBLIC_API_URL || 'https://viralvpn.net'}/api`
+    baseURL: typeof window !== 'undefined' ? window.location.origin : 'https://viralvpn.vercel.app',
+    apiURL: `${typeof window !== 'undefined' ? window.location.origin : 'https://viralvpn.vercel.app'}/api`
   }
 };
 
