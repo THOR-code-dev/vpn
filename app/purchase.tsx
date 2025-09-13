@@ -105,10 +105,10 @@ export default function PurchaseScreen() {
         );
       } else {
         Alert.alert(
-          'Talebiniz Başarıyla Alındı! ✅',
-          `Merhaba! Email adresiniz (${email}) sistemimize kaydedildi.\n\n📋 Seçilen Plan: ${plan === 'yearly' ? 'Yıllık (365 gün)' : 'Aylık (30 gün)'}\n💰 Fiyat: ${plan === 'yearly' ? '$59.99' : '$9.99'}\n\n🔑 Admin panelimizden sizin için bir lisans oluşturulacak ve email ile bilgilendirileceksiniz.\n\n⏱️ İşlem süresi: 24 saat içinde\n\n📧 Sorularınız için destek@viralvpn.net adresinden bize ulaşabilirsiniz.`,
+          '🎉 Başarıyla Kayıt Oluşturuldu!',
+          `Tebrikler! Ödemeniz başarıyla tamamlandı.\n\n📧 Email: ${email}\n📋 Plan: ${plan === 'yearly' ? 'Yıllık (365 gün)' : 'Aylık (30 gün)'}\n💰 Ödenen: ${plan === 'yearly' ? '$59.99' : '$9.99'}\n\n✅ Lisansınız başarıyla oluşturuldu ve en kısa zamanda mailinize iletilecektir.\n\n⏰ Genellikle 5-10 dakika içinde email alırsınız.\n\n📧 Sorularınız için: destek@viralvpn.net`,
           [
-            { text: 'Tamam', onPress: () => router.back() }
+            { text: 'Harika!', onPress: () => router.back() }
           ]
         );
       }
