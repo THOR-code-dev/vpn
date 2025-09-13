@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Switch, Alert, SafeAreaView, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Switch, Alert, SafeAreaView, ScrollView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -55,36 +55,55 @@ export default function SettingsScreen() {
     await AsyncStorage.setItem('vpn_kill_switch', value.toString());
   };
 
+  const performLogout = async () => {
+    try {
+      // Clear all VPN-related data
+      await AsyncStorage.multiRemove([
+        'vpn_license',
+        'vpn_servers',
+        'vpn_expiry',
+        'vpn_selected_server',
+      ]);
+      // Extra safety: clear any remaining keys
+      try { await AsyncStorage.clear(); } catch {}
+
+      // Navigate to home screen (web fallback)
+      console.log('Logout: cleared storage, navigating to /');
+      if (Platform.OS === 'web') {
+        // Force full reload on web to avoid stale state
+        try {
+          // Extra: clear browser storages too
+          window.localStorage?.clear?.();
+          window.sessionStorage?.clear?.();
+        } catch {}
+        // Do both: router replace and hard reload shortly after
+        try { router.replace('/'); } catch {}
+        const target = (window.location?.origin || '') + '/';
+        setTimeout(() => { window.location.replace(target); }, 50);
+      } else {
+        router.replace('/');
+      }
+    } catch (error) {
+      console.error('Error during logout:', error);
+      Alert.alert('Hata', 'Çıkış yapılamadı. Lütfen tekrar deneyin.');
+    }
+  };
+
   const handleLogout = async () => {
+    if (Platform.OS === 'web') {
+      const ok = window.confirm('Çıkış yapmak istediğinizden emin misiniz? Bu işlem lisans bilgilerinizi silecektir.');
+      if (ok) {
+        try { router.replace('/logout'); } catch { window.location.assign('/logout'); }
+      }
+      return;
+    }
+
     Alert.alert(
       'Çıkış Yap',
       'Çıkış yapmak istediğinizden emin misiniz? Bu işlem lisans bilgilerinizi silecektir.',
       [
-        {
-          text: 'İptal',
-          style: 'cancel',
-        },
-        {
-          text: 'Çıkış Yap',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Clear all VPN-related data
-              await AsyncStorage.multiRemove([
-                'vpn_license',
-                'vpn_servers',
-                'vpn_expiry',
-                'vpn_selected_server',
-              ]);
-              
-              // Navigate back to welcome screen
-              router.replace('/');
-            } catch (error) {
-              console.error('Error during logout:', error);
-              Alert.alert('Hata', 'Çıkış yapılamadı. Lütfen tekrar deneyin.');
-            }
-          },
-        },
+        { text: 'İptal', style: 'cancel' },
+        { text: 'Çıkış Yap', style: 'destructive', onPress: performLogout },
       ]
     );
   };
@@ -98,8 +117,7 @@ export default function SettingsScreen() {
   };
 
   const handleProfile = () => {
-    // Profile screen would go here
-    console.log('Profile screen');
+    router.push('/profile');
   };
 
   const settingsItems = [

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
+
 import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 // import { Shield } from '../components/Icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Link } from 'expo-router';
+import { Link, useFocusEffect } from 'expo-router';
+import { checkLicenseOnFocus } from '../src/services/licenseChecker';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -29,6 +31,26 @@ export default function WelcomeScreen() {
 
     checkLicense();
   }, []);
+
+  // Re-check when screen gains focus (web + native)
+  useFocusEffect(
+    React.useCallback(() => {
+      const refresh = async () => {
+        try {
+          // Lisans durumunu kontrol et
+          await checkLicenseOnFocus();
+          
+          // License varlığını yenile
+          const license = await AsyncStorage.getItem('vpn_license');
+          setHasLicense(!!license);
+        } catch (e) {
+          console.error('Error refreshing license on focus:', e);
+        }
+      };
+      refresh();
+      return () => {};
+    }, [])
+  );
 
   const handleContinue = () => {
     router.push('/servers');

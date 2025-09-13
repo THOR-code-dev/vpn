@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getApiUrl, API_ENDPOINTS } from '../src/config/api';
+import { loginAdmin } from '../src/services/auth';
 
 export default function AdminLoginScreen() {
   const [username, setUsername] = useState('');
@@ -11,29 +11,35 @@ export default function AdminLoginScreen() {
   const router = useRouter();
 
   const handleLogin = async () => {
+    console.log('🔐 Admin login attempt:', { username, password: password ? '***' : 'empty' });
+    
     if (!username || !password) {
+      console.log('❌ Validation failed: missing username or password');
       Alert.alert('Hata', 'Kullanıcı adı ve şifre gerekli');
       return;
     }
 
     setLoading(true);
+    console.log('⏳ Setting loading state to true');
+    
     try {
-      const res = await fetch(getApiUrl(API_ENDPOINTS.adminLogin), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        await AsyncStorage.setItem('admin_token', data.token);
+      console.log('📞 Calling loginAdmin function...');
+      const success = await loginAdmin(username, password);
+      console.log('📞 loginAdmin result:', success);
+      
+      if (success) {
+        console.log('✅ Login successful, saving to AsyncStorage and redirecting');
+        await AsyncStorage.setItem('admin_logged_in', 'true');
         router.replace('/admin');
       } else {
-        Alert.alert('Hata', data.error || 'Giriş başarısız');
+        console.log('❌ Login failed');
+        Alert.alert('Hata', 'Giriş başarısız');
       }
     } catch (error) {
-      Alert.alert('Hata', 'Sunucuya ulaşılamadı');
+      console.error('💥 Login error:', error);
+      Alert.alert('Hata', 'Giriş işlemi sırasında hata oluştu');
     } finally {
+      console.log('✅ Setting loading state to false');
       setLoading(false);
     }
   };

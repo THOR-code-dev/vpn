@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -25,6 +26,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-producti
 let stripe = null;
 if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_SECRET_KEY !== 'sk_test_mock_key_for_development') {
   stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+}
+
+// Supabase setup
+let supabase = null;
+if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+  supabase = createClient(
+    process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
+  );
+  console.log('✅ Supabase connected successfully');
+} else {
+  console.warn('⚠️  Supabase credentials not found, using in-memory data');
 }
 
 // In-memory database for Vercel serverless
@@ -131,13 +144,56 @@ const VPN_SERVERS = [
 ];
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'disconnected';
+  let dbInfo = {};
+  
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('licenses')
+        .select('count')
+        .limit(1);
+      
+      if (!error) {
+        dbStatus = 'connected';
+        
+        // Get counts from database
+        const { data: licenseCount } = await supabase
+          .from('licenses')
+          .select('id', { count: 'exact' });
+        
+        const { data: userCount } = await supabase
+          .from('users')
+          .select('id', { count: 'exact' });
+          
+        dbInfo = {
+          type: 'Supabase',
+          licenses: licenseCount?.length || 0,
+          users: userCount?.length || 0
+        };
+      }
+    } catch (error) {
+      console.error('Database health check failed:', error);
+      dbStatus = 'error';
+      dbInfo = { error: error.message };
+    }
+  } else {
+    dbInfo = {
+      type: 'In-Memory',
+      licenses: licenses.length,
+      users: users.length
+    };
+  }
+  
   res.json({ 
     status: 'ok', 
     message: 'ViralVPN API is running',
     timestamp: new Date().toISOString(),
-    licenses: licenses.length,
-    users: users.length
+    database: {
+      status: dbStatus,
+      ...dbInfo
+    }
   });
 });
 
@@ -145,17 +201,40 @@ app.get('/api/health', (req, res) => {
 app.post('/api/validate-license', async (req, res) => {
   try {
     const { licenseKey } = req.body;
-    const license = licenses.find(l => l.key === licenseKey);
-
-    if (!license) {
-      return res.status(404).json({
-        status: 'invalid',
-        message: 'License key not found'
-      });
+    
+    let license;
+    
+    if (supabase) {
+      // Use Supabase database
+      const { data, error } = await supabase
+        .from('licenses')
+        .select('*')
+        .eq('key', licenseKey)
+        .eq('status', 'active')
+        .single();
+      
+      if (error || !data) {
+        return res.status(404).json({
+          status: 'invalid',
+          message: 'License key not found'
+        });
+      }
+      
+      license = data;
+    } else {
+      // Fallback to in-memory data
+      license = licenses.find(l => l.key === licenseKey);
+      
+      if (!license) {
+        return res.status(404).json({
+          status: 'invalid',
+          message: 'License key not found'
+        });
+      }
     }
 
     // Check if license is expired
-    const expiryDate = new Date(license.expiryDate);
+    const expiryDate = new Date(license.expiry_date || license.expiryDate);
     const now = new Date();
     const remainingDays = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
 
@@ -324,71 +403,260 @@ app.delete('/api/servers/:id', async (req, res) => {
 
 app.get('/api/licenses', async (req, res) => {
   try {
-    res.json(licenses);
+    if (supabase) {
+      console.log('📊 Supabase\'den lisanslar getiriliyor...');
+      const { data, error } = await supabase
+        .from('licenses')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('❌ Supabase fetch hatası:', error);
+        throw error;
+      }
+      
+      console.log('✅ Supabase\'den lisanslar getirildi:', data.length + ' adet');
+      // Her lisansın alanını kontrol et
+      data.forEach((license, index) => {
+        console.log(`📋 Lisans ${index + 1}:`, {
+          id: license.id,
+          key: license.key,
+          email: license.email,
+          plan: license.plan,
+          status: license.status,
+          hasExpiryDate: !!license.expiry_date,
+          hasCreatedAt: !!license.created_at
+        });
+      });
+      res.json(data);
+    } else {
+      console.log('📊 In-memory lisanslar getiriliyor:', licenses.length + ' adet');
+      // In-memory lisansların alanını kontrol et
+      licenses.forEach((license, index) => {
+        console.log(`📋 In-memory Lisans ${index + 1}:`, {
+          id: license.id,
+          key: license.key,
+          email: license.email,
+          plan: license.plan,
+          status: license.status,
+          hasExpiryDate: !!license.expiryDate,
+          hasCreatedAt: !!license.createdAt
+        });
+      });
+      res.json(licenses);
+    }
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch licenses' });
+    console.error('Fetch licenses error:', error);
+    res.status(500).json({ error: 'Failed to fetch licenses', details: error.message });
   }
 });
 
 app.post('/api/licenses', async (req, res) => {
   try {
-    const { email, expiryDate } = req.body;
+    const { email, expiryDate, plan, purchaseRequestId } = req.body;
     const licenseKey = generateLicenseKey();
     
     const newLicense = {
       id: uuidv4(),
       key: licenseKey,
       email,
-      createdAt: new Date().toISOString(),
-      expiryDate,
-      status: 'active'
+      created_at: new Date().toISOString(),
+      expiry_date: expiryDate,
+      status: 'active',
+      plan: plan || 'monthly'
     };
 
-    licenses.push(newLicense);
-    
-    res.json(newLicense);
+    if (supabase) {
+      console.log('📦 Supabase\'e lisans ekleniyor:', newLicense);
+      const { data, error } = await supabase
+        .from('licenses')
+        .insert([newLicense])
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('❌ Supabase insert hatası:', error);
+        throw error;
+      }
+      
+      console.log('✅ Supabase\'e lisans eklendi:', data);
+      
+      // Eğer bir satın alma talebinden geliyorsa, o talebi "completed" olarak işaretle
+      if (purchaseRequestId) {
+        console.log('🔄 Satın alma talebi tamamlandı olarak işaretleniyor:', purchaseRequestId);
+        const { data: updatedRequest, error: updateError } = await supabase
+          .from('purchase_requests')
+          .update({ 
+            status: 'completed',
+            processed_at: new Date().toISOString(),
+            admin_notes: `Lisans oluşturuldu: ${licenseKey}`
+          })
+          .eq('id', purchaseRequestId)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.warn('⚠️ Satın alma talebi güncelleme hatası:', updateError);
+        } else {
+          console.log('✅ Satın alma talebi tamamlandı:', updatedRequest);
+        }
+      }
+      
+      res.json(data);
+    } else {
+      // Fallback to in-memory
+      const fallbackLicense = {
+        ...newLicense,
+        createdAt: newLicense.created_at,
+        expiryDate: newLicense.expiry_date
+      };
+      licenses.push(fallbackLicense);
+      
+      // In-memory purchase request update
+      if (purchaseRequestId && global.purchaseRequests) {
+        const requestIndex = global.purchaseRequests.findIndex(r => r.id === purchaseRequestId);
+        if (requestIndex !== -1) {
+          global.purchaseRequests[requestIndex].status = 'completed';
+          global.purchaseRequests[requestIndex].processed_at = new Date().toISOString();
+          global.purchaseRequests[requestIndex].admin_notes = `Lisans oluşturuldu: ${licenseKey}`;
+          console.log('✅ In-memory satın alma talebi tamamlandı');
+        }
+      }
+      
+      console.log('✅ In-memory lisans eklendi:', fallbackLicense);
+      res.json(fallbackLicense);
+    }
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create license' });
+    console.error('Create license error:', error);
+    res.status(500).json({ error: 'Failed to create license', details: error.message });
   }
 });
 
 app.put('/api/licenses/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const licenseIndex = licenses.findIndex(l => l.id === id);
     
-    if (licenseIndex === -1) {
-      return res.status(404).json({ error: 'License not found' });
+    if (supabase) {
+      console.log('🔄 Supabase\'de lisans güncelleniyor:', id);
+      const { data, error } = await supabase
+        .from('licenses')
+        .update(req.body)
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('❌ Supabase update hatası:', error);
+        return res.status(404).json({ error: 'License not found', details: error.message });
+      }
+      
+      console.log('✅ Supabase\'de lisans güncellendi:', data);
+      res.json(data);
+    } else {
+      // Fallback to in-memory
+      const licenseIndex = licenses.findIndex(l => l.id === id);
+      
+      if (licenseIndex === -1) {
+        return res.status(404).json({ error: 'License not found' });
+      }
+      
+      licenses[licenseIndex] = { ...licenses[licenseIndex], ...req.body };
+      console.log('✅ In-memory lisans güncellendi:', licenses[licenseIndex]);
+      res.json(licenses[licenseIndex]);
     }
-    
-    licenses[licenseIndex] = { ...licenses[licenseIndex], ...req.body };
-    
-    res.json(licenses[licenseIndex]);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update license' });
+    console.error('Update license error:', error);
+    res.status(500).json({ error: 'Failed to update license', details: error.message });
   }
 });
 
 app.delete('/api/licenses/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('Lisans silme isteği:', { id });
+    console.log('🗑️ Lisans silme isteği:', { id, supabaseActive: !!supabase });
     
-    const licenseIndex = licenses.findIndex(l => l.id === id);
-    
-    if (licenseIndex === -1) {
-      console.log('Lisans bulunamadı');
-      return res.status(404).json({ error: 'License not found' });
+    if (supabase) {
+      // Önce lisansın var olup olmadığını kontrol et
+      const { data: existingLicense, error: fetchError } = await supabase
+        .from('licenses')
+        .select('*')
+        .eq('id', id)
+        .single();
+        
+      if (fetchError || !existingLicense) {
+        console.log('❌ Lisans bulunamadı (Supabase):', fetchError);
+        return res.status(404).json({ error: 'License not found', details: fetchError?.message });
+      }
+      
+      console.log('📋 Silinecek lisans:', existingLicense);
+      
+      const { data, error } = await supabase
+        .from('licenses')
+        .delete()
+        .eq('id', id)
+        .select();
+      
+      if (error) {
+        console.error('❌ Supabase silme hatası:', error);
+        return res.status(500).json({ error: 'Failed to delete license', details: error.message });
+      }
+      
+      console.log('✅ Supabase lisans silindi:', data);
+      
+      // Silinen lisansla ilişkili kullanıcıları da temizle
+      if (data[0] && data[0].key) {
+        try {
+          const { data: usersData, error: usersError } = await supabase
+            .from('users')
+            .delete()
+            .eq('license_key', data[0].key);
+          
+          if (usersError) {
+            console.warn('⚠️ Kullanıcı temizleme hatası:', usersError);
+          } else {
+            console.log('🗑️ İlişkili kullanıcılar temizlendi:', usersData?.length || 0);
+          }
+        } catch (userCleanupError) {
+          console.warn('⚠️ Kullanıcı temizleme hatası:', userCleanupError);
+        }
+      }
+      
+      res.json({ 
+        message: 'License deleted successfully', 
+        deletedLicense: data[0],
+        cleanedUsers: true
+      });
+    } else {
+      // Fallback to in-memory
+      console.log('🔍 In-memory lisanslar:', licenses.map(l => ({ id: l.id, key: l.key })));
+      
+      const licenseIndex = licenses.findIndex(l => l.id === id);
+      
+      if (licenseIndex === -1) {
+        console.log('❌ In-memory lisans bulunamadı');
+        return res.status(404).json({ error: 'License not found' });
+      }
+      
+      const deletedLicense = licenses[licenseIndex];
+      licenses.splice(licenseIndex, 1);
+      
+      // Silinen lisansla ilişkili kullanıcıları da temizle
+      const initialUserCount = users.length;
+      users = users.filter(user => user.licenseKey !== deletedLicense.key);
+      const cleanedUserCount = initialUserCount - users.length;
+      
+      console.log('✅ In-memory lisans silindi:', deletedLicense);
+      console.log('🗑️ İlişkili kullanıcılar temizlendi:', cleanedUserCount);
+      
+      res.json({ 
+        message: 'License deleted successfully', 
+        deletedLicense,
+        cleanedUsers: cleanedUserCount
+      });
     }
-    
-    const deletedLicense = licenses[licenseIndex];
-    licenses.splice(licenseIndex, 1);
-    
-    console.log('Lisans silindi:', deletedLicense);
-    res.json({ message: 'License deleted', deletedLicense });
   } catch (error) {
-    console.error('Lisans silme hatası:', error);
-    res.status(500).json({ error: 'Failed to delete license' });
+    console.error('💥 Lisans silme genel hatası:', error);
+    res.status(500).json({ error: 'Failed to delete license', details: error.message });
   }
 });
 
@@ -495,9 +763,205 @@ app.post('/api/admin/verify', (req, res) => {
   }
 });
 
+// Purchase request endpoint - Email toplama ve database'e kaydetme
+app.post('/api/purchase-request', async (req, res) => {
+  console.log('📥 POST /api/purchase-request - İstek alındı');
+  console.log('📄 Headers:', req.headers);
+  console.log('📋 Body:', req.body);
+  
+  try {
+    const { email, plan } = req.body;
+    
+    console.log('📝 Satın alma talebi alındı:', { email, plan });
+    
+    // Validation
+    if (!email || !plan) {
+      return res.status(400).json({ 
+        error: 'Email ve plan bilgisi gerekli',
+        message: 'Email adresi ve plan seçimi zorunludur'
+      });
+    }
+    
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(email)) {
+      return res.status(400).json({ 
+        error: 'Geçersiz email formatı',
+        message: 'Lütfen geçerli bir email adresi girin'
+      });
+    }
+    
+    if (!['monthly', 'yearly'].includes(plan)) {
+      return res.status(400).json({ 
+        error: 'Geçersiz plan',
+        message: 'Sadece monthly veya yearly plan seçilebilir'
+      });
+    }
+
+    const purchaseRequest = {
+      id: uuidv4(),
+      email: email.toLowerCase().trim(),
+      plan: plan,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      price: plan === 'yearly' ? 59.99 : 9.99
+    };
+
+    if (supabase) {
+      // Supabase'e kaydet
+      const { data, error } = await supabase
+        .from('purchase_requests')
+        .insert(purchaseRequest)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('❌ Supabase satın alma talebi kaydetme hatası:', error);
+        return res.status(500).json({ 
+          error: 'Veritabanı hatası',
+          message: 'Talebiniz kaydedilemedi, lütfen tekrar deneyin'
+        });
+      }
+      
+      console.log('✅ Supabase satın alma talebi kaydedildi:', data);
+      
+      res.json({
+        success: true,
+        message: 'Satın alma talebi başarıyla kaydedildi',
+        requestId: data.id,
+        email: data.email,
+        plan: data.plan,
+        // Demo için Stripe URL eklemiyoruz
+        // stripeUrl: 'https://checkout.stripe.com/demo'
+      });
+    } else {
+      // In-memory storage (demo için)
+      console.log('📋 In-memory satın alma talebi kaydediliyor:', purchaseRequest);
+      
+      // Basit in-memory array (gerçek projede Supabase kullanılacak)
+      if (!global.purchaseRequests) {
+        global.purchaseRequests = [];
+      }
+      global.purchaseRequests.push(purchaseRequest);
+      
+      console.log('✅ In-memory satın alma talebi kaydedildi');
+      
+      res.json({
+        success: true,
+        message: 'Satın alma talebi başarıyla kaydedildi',
+        requestId: purchaseRequest.id,
+        email: purchaseRequest.email,
+        plan: purchaseRequest.plan
+      });
+    }
+  } catch (error) {
+    console.error('💥 Satın alma talebi hatası:', error);
+    res.status(500).json({ 
+      error: 'Sunucu hatası',
+      message: 'Bir hata oluştu, lütfen tekrar deneyin'
+    });
+  }
+});
+
+// Purchase requests listesini getir (admin için)
+app.get('/api/purchase-requests', async (req, res) => {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('purchase_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('❌ Supabase satın alma talepleri getirme hatası:', error);
+        return res.status(500).json({ error: 'Failed to fetch purchase requests' });
+      }
+      
+      console.log('📋 Supabase satın alma talepleri getiriliyor:', data?.length || 0, 'adet');
+      res.json(data || []);
+    } else {
+      // In-memory fallback
+      const requests = global.purchaseRequests || [];
+      console.log('📋 In-memory satın alma talepleri:', requests.length, 'adet');
+      res.json(requests);
+    }
+  } catch (error) {
+    console.error('💥 Satın alma talepleri getirme hatası:', error);
+    res.status(500).json({ error: 'Failed to fetch purchase requests' });
+  }
+});
+
+// Delete purchase request endpoint
+app.delete('/api/purchase-requests/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('🗑️ Satın alma talebi silme isteği:', { id, supabaseActive: !!supabase });
+    
+    if (supabase) {
+      // Önce talebin var olup olmadığını kontrol et
+      const { data: existingRequest, error: fetchError } = await supabase
+        .from('purchase_requests')
+        .select('*')
+        .eq('id', id)
+        .single();
+        
+      if (fetchError || !existingRequest) {
+        console.log('❌ Satın alma talebi bulunamadı (Supabase):', fetchError);
+        return res.status(404).json({ error: 'Purchase request not found', details: fetchError?.message });
+      }
+      
+      console.log('📋 Silinecek satın alma talebi:', existingRequest);
+      
+      const { data, error } = await supabase
+        .from('purchase_requests')
+        .delete()
+        .eq('id', id)
+        .select();
+      
+      if (error) {
+        console.error('❌ Supabase satın alma talebi silme hatası:', error);
+        return res.status(500).json({ error: 'Failed to delete purchase request', details: error.message });
+      }
+      
+      console.log('✅ Supabase satın alma talebi silindi:', data);
+      
+      res.json({ 
+        message: 'Purchase request deleted successfully', 
+        deletedRequest: data[0]
+      });
+    } else {
+      // Fallback to in-memory
+      if (!global.purchaseRequests) {
+        global.purchaseRequests = [];
+      }
+      
+      console.log('🔍 In-memory satın alma talepleri:', global.purchaseRequests.map(r => ({ id: r.id, email: r.email })));
+      
+      const requestIndex = global.purchaseRequests.findIndex(r => r.id === id);
+      
+      if (requestIndex === -1) {
+        console.log('❌ In-memory satın alma talebi bulunamadı');
+        return res.status(404).json({ error: 'Purchase request not found' });
+      }
+      
+      const deletedRequest = global.purchaseRequests[requestIndex];
+      global.purchaseRequests.splice(requestIndex, 1);
+      
+      console.log('✅ In-memory satın alma talebi silindi:', deletedRequest);
+      
+      res.json({ 
+        message: 'Purchase request deleted successfully', 
+        deletedRequest
+      });
+    }
+  } catch (error) {
+    console.error('💥 Satın alma talebi silme genel hatası:', error);
+    res.status(500).json({ error: 'Failed to delete purchase request', details: error.message });
+  }
+});
+
 // Initialize database and start server
 // initializeDatabase().then(() => { // This line is removed as per the new_code
   app.listen(port, () => {
     console.log(`Server running on port ${port}`);
   });
-// });
+// }); 

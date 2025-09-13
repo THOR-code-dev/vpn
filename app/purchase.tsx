@@ -1,20 +1,123 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, ScrollView, Alert, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
+import { API_URL } from '../src/config/api';
 // import { ArrowLeft, ShoppingCart, CheckCircle2 } from '../components/Icons';
 
 export default function PurchaseScreen() {
   const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleBack = () => {
     router.back();
   };
 
-  const handlePurchase = (plan: string) => {
-    // For demo purposes, we'll just open a mock payment page
-    // In a real app, this would integrate with Stripe or another payment provider
-    Alert.alert('Satın Alındı', `Seçtiğiniz plan: ${plan}`);
+  const handlePurchase = async (plan: string) => {
+    // Form validation
+    if (!email.trim()) {
+      setError('Lütfen email adresinizi girin');
+      return;
+    }
+    
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(email.trim())) {
+      setError('Geçerli bir email adresi girin');
+      return;
+    }
+    
+    if (!plan) {
+      setError('Lütfen bir plan seçin');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      console.log('📝 Satın alma talebi oluşturuluyor...', { email: email.trim(), plan });
+      console.log('🌍 API_URL:', API_URL);
+      
+      const requestUrl = `${API_URL}/purchase-request`;
+      console.log('🔗 Request URL:', requestUrl);
+      
+      const requestBody = {
+        email: email.trim(),
+        plan: plan,
+        status: 'pending'
+      };
+      console.log('📦 Request Body:', requestBody);
+      
+      // Backend'e email ve plan bilgisini gönder
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+      
+      console.log('📨 Response Status:', response.status);
+      console.log('📨 Response OK:', response.ok);
+      console.log('📨 Response Headers:', response.headers);
+
+      console.log('📨 Response Status:', response.status);
+      console.log('📨 Response OK:', response.ok);
+      console.log('📨 Response Headers:', response.headers);
+
+      if (!response.ok) {
+        console.error('❌ Response not OK, reading as text...');
+        const responseText = await response.text();
+        console.error('📝 Response Text:', responseText);
+        
+        try {
+          const errorData = JSON.parse(responseText);
+          throw new Error(errorData.message || 'Satın alma talebi oluşturulamadı');
+        } catch (parseError) {
+          console.error('❌ JSON parse hatası, HTML döndü:', parseError);
+          throw new Error('Sunucu hatası: Backend erişilemiyor veya yanlış URL');
+        }
+      }
+
+      const responseText = await response.text();
+      console.log('📝 Response Text:', responseText);
+      
+      const result = JSON.parse(responseText);
+      console.log('✅ Satın alma talebi oluşturuldu:', result);
+
+      // Stripe checkout'a yönlendir
+      if (result.stripeUrl) {
+        // Production'da Stripe checkout sayfasına yönlendirilecek
+        Alert.alert(
+          'Ödeme Sayfasına Yönlendiriliyor',
+          `Email: ${email}\nPlan: ${plan}\n\nStripe ödeme sayfasına yönlendirileceksiniz.`,
+          [
+            {
+              text: 'Tamam',
+              onPress: () => {
+                // window.open(result.stripeUrl, '_blank'); // Web için
+                Alert.alert('Demo Mod', 'Gerçek ortamda Stripe sayfasına yönlendirileceksiniz.');
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Talebiniz Başarıyla Alındı! ✅',
+          `Merhaba! Email adresiniz (${email}) sistemimize kaydedildi.\n\n📋 Seçilen Plan: ${plan === 'yearly' ? 'Yıllık (365 gün)' : 'Aylık (30 gün)'}\n💰 Fiyat: ${plan === 'yearly' ? '$59.99' : '$9.99'}\n\n🔑 Admin panelimizden sizin için bir lisans oluşturulacak ve email ile bilgilendirileceksiniz.\n\n⏱️ İşlem süresi: 24 saat içinde\n\n📧 Sorularınız için destek@viralvpn.net adresinden bize ulaşabilirsiniz.`,
+          [
+            { text: 'Tamam', onPress: () => router.back() }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('💥 Satın alma hatası:', error);
+      setError(error.message || 'Bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const plans = [
@@ -53,8 +156,30 @@ export default function PurchaseScreen() {
         </View>
         
         <Text style={styles.description}>
-          VPN hizmetimizi kullanmaya başlamak için bir lisans planı seçin
+          VPN hizmetimizi kullanmaya başlamak için email adresinizi girin ve bir lisans planı seçin
         </Text>
+        
+        {/* Email Input */}
+        <View style={styles.emailContainer}>
+          <Text style={styles.emailLabel}>Email Adresi</Text>
+          <TextInput
+            style={[styles.emailInput, error && error.includes('email') ? styles.inputError : null]}
+            value={email}
+            onChangeText={(text) => {
+              setEmail(text);
+              if (error) setError(''); // Clear error when user types
+            }}
+            placeholder="ornek@email.com"
+            placeholderTextColor="#94A3B8"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          
+          {error ? (
+            <Text style={styles.errorText}>{error}</Text>
+          ) : null}
+        </View>
         
         <View style={styles.plansContainer}>
           {plans.map((plan) => (
@@ -95,12 +220,18 @@ export default function PurchaseScreen() {
             </View>
             
             <TouchableOpacity 
-          style={[styles.purchaseButton, { opacity: selectedPlan ? 1 : 0.5 }]}
+          style={[styles.purchaseButton, { opacity: (selectedPlan && email.trim() && !loading) ? 1 : 0.5 }]}
           onPress={() => handlePurchase(selectedPlan)}
-          disabled={!selectedPlan}
+          disabled={!selectedPlan || !email.trim() || loading}
             >
-          <Text style={{ fontSize: 20, color: '#FFFFFF' }}>🛒</Text>
-          <Text style={styles.purchaseButtonText}>Satın Al</Text>
+          {loading ? (
+            <Text style={styles.purchaseButtonText}>Yükleniyor...</Text>
+          ) : (
+            <>
+              <Text style={{ fontSize: 20, color: '#FFFFFF' }}>💳</Text>
+              <Text style={styles.purchaseButtonText}>Satın Al</Text>
+            </>
+          )}
           </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -146,10 +277,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#64748B',
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
+    paddingHorizontal: 16,
+  },
+  emailContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  emailLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E3A8A',
+    marginBottom: 8,
+  },
+  emailInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  inputError: {
+    borderColor: '#EF4444',
+    borderWidth: 2,
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
   },
   plansContainer: {
     width: '100%',
+    paddingHorizontal: 16,
   },
   planCard: {
     backgroundColor: '#FFFFFF',

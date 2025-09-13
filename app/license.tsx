@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { validateLicense } from '../api/licenseAPI';
+import { validateLicense } from '../src/services/license';
 
 export default function LicenseScreen() {
   const router = useRouter();
@@ -19,8 +19,16 @@ export default function LicenseScreen() {
   };
 
   const handleSubmit = async () => {
+    // Basic validation
     if (!licenseKey.trim()) {
       setError('Lütfen bir lisans anahtarı girin');
+      return;
+    }
+    
+    // Format validation
+    const licensePattern = /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+    if (!licensePattern.test(licenseKey.trim())) {
+      setError('Lisans anahtarı formatı: XXXX-XXXX-XXXX-XXXX (büyük harf ve rakam)');
       return;
     }
 
@@ -28,22 +36,32 @@ export default function LicenseScreen() {
     setError('');
 
     try {
-      const response = await validateLicense(licenseKey);
-      
-      if (response.status === 'valid') {
-        // Store the license key and available servers
-        await AsyncStorage.setItem('vpn_license', licenseKey);
-        await AsyncStorage.setItem('vpn_servers', JSON.stringify(response.available_servers));
-        await AsyncStorage.setItem('vpn_expiry', response.remaining_days.toString());
-        
-        // Navigate to the servers screen
+      const result = await validateLicense(licenseKey.trim());
+      console.log('validateLicense result:', result);
+
+      if (result.status === 'valid') {
+        await AsyncStorage.setItem('vpn_license', licenseKey.trim());
+        if (result.servers) {
+          await AsyncStorage.setItem('vpn_servers', JSON.stringify(result.servers));
+        }
+        if (typeof result.remainingDays === 'number') {
+          await AsyncStorage.setItem('vpn_expiry', result.remainingDays.toString());
+        }
         router.replace('/servers');
+      } else if (result.status === 'invalid') {
+        setError('Bu lisans anahtarı geçersiz. Lütfen doğru anahtarı girin.');
+      } else if (result.status === 'expired') {
+        setError('Bu lisansın süresi dolmuş. Yeni bir lisans satın alın.');
       } else {
-        setError('Geçersiz lisans anahtarı. Lütfen tekrar deneyin.');
+        setError('Lisans doğrulanamadı. Lütfen tekrar deneyin.');
       }
     } catch (error) {
       console.error('License validation error:', error);
-      setError('Bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
+      if (error.message && error.message.includes('fetch')) {
+        setError('İnternet bağlantınızı kontrol edin ve tekrar deneyin.');
+      } else {
+        setError('Sunucu ile bağlantı kurulamadı. Lütfen daha sonra tekrar deneyin.');
+      }
     } finally {
       setLoading(false);
     }
@@ -72,21 +90,35 @@ export default function LicenseScreen() {
         <View style={styles.formContainer}>
           <Text style={styles.inputLabel}>Lisans Anahtarı</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, error ? styles.inputError : null]}
             value={licenseKey}
-            onChangeText={setLicenseKey}
+            onChangeText={(text) => {
+              setLicenseKey(text);
+              if (error) setError(''); // Clear error when user types
+            }}
             placeholder="XXXX-XXXX-XXXX-XXXX"
             placeholderTextColor="#94A3B8"
             autoCapitalize="characters"
             autoCorrect={false}
           />
           
+          {error ? (
+            <Text style={styles.errorText}>{error}</Text>
+          ) : null}
+          
           <TouchableOpacity
-            style={[styles.button, { opacity: licenseKey.trim() ? 1 : 0.5 }]}
+            style={[styles.button, loading ? styles.buttonLoading : (licenseKey.trim() ? null : styles.buttonDisabled)]}
             onPress={handleSubmit}
-            disabled={!licenseKey.trim()}
+            disabled={!licenseKey.trim() || loading}
           >
-            <Text style={styles.buttonText}>Lisansı Doğrula</Text>
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={[styles.buttonText, { marginLeft: 8 }]}>Doğrulanıyor...</Text>
+              </View>
+            ) : (
+              <Text style={styles.buttonText}>Lisansı Doğrula</Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -161,12 +193,17 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     color: '#1E293B',
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  inputError: {
+    borderColor: '#EF4444',
+    borderWidth: 2,
   },
   errorText: {
     color: '#EF4444',
     fontSize: 14,
-    marginBottom: 16,
+    marginBottom: 12,
+    fontWeight: '500',
   },
   button: {
     backgroundColor: '#3B82F6',
@@ -178,6 +215,14 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     backgroundColor: '#94A3B8',
+    opacity: 0.6,
+  },
+  buttonLoading: {
+    backgroundColor: '#1E40AF',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   buttonText: {
     color: '#FFFFFF',

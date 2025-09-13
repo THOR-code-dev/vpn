@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connectVPN, disconnectVPN } from '../api/vpnAPI';
+import { checkLicenseAndLogout, checkLicenseOnFocus, startLicenseMonitoring } from '../src/services/licenseChecker';
 
 type Server = {
   id: string;
@@ -25,6 +26,15 @@ export default function ConnectionScreen() {
     // Load selected server
     const loadServer = async () => {
       try {
+        // Önce lisans durumunu kontrol et
+        console.log('🔍 Connection sayfasında lisans kontrol ediliyor...');
+        const licenseStatus = await checkLicenseAndLogout();
+        
+        if (licenseStatus.shouldLogout) {
+          console.log('🚫 Lisans geçersiz, bağlantı sayfası kapatılıyor');
+          return; // Logout oldu, işlemi durdur
+        }
+        
         const serverJson = await AsyncStorage.getItem('vpn_selected_server');
         if (serverJson) {
           setServer(JSON.parse(serverJson));
@@ -37,14 +47,32 @@ export default function ConnectionScreen() {
     };
 
     loadServer();
+    
+    // Periyodik lisans kontrolü başlat (5 dakikada bir)
+    const monitoringInterval = startLicenseMonitoring(5);
 
     // Clean up on unmount
     return () => {
       if (isConnected) {
         handleDisconnect();
       }
+      if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+        console.log('📋 Connection sayfasında lisans izleme durduruldu');
+      }
     };
   }, []);
+
+  // Sayfa odaklandığında lisans kontrol et
+  useFocusEffect(
+    React.useCallback(() => {
+      const checkOnFocus = async () => {
+        await checkLicenseOnFocus();
+      };
+      checkOnFocus();
+      return () => {};
+    }, [])
+  );
 
   useEffect(() => {
     let timer: NodeJS.Timeout;

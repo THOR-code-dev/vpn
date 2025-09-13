@@ -1,15 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
-// import { Settings, Globe, Wifi, Signal, Clock, ArrowRight } from '../components/Icons';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from '../src/config/api';
+import { checkLicenseAndLogout, checkLicenseOnFocus, startLicenseMonitoring } from '../src/services/licenseChecker';
 
 type Server = {
   id: string;
   country: string;
   name: string;
-  speed: string;
-  accessKey: string;
+  status: string;
+  users_count?: number;
+  access_key: string;
+  city: string;
+  ip: string;
+  port: number;
 };
 
 export default function ServersScreen() {
@@ -21,15 +26,28 @@ export default function ServersScreen() {
   useEffect(() => {
     const loadServers = async () => {
       try {
-        const serversJson = await AsyncStorage.getItem('vpn_servers');
-        const expiry = await AsyncStorage.getItem('vpn_expiry');
+        // Önce lisans durumunu kontrol et
+        console.log('🔍 Sunucular yüklenirken lisans kontrol ediliyor...');
+        const licenseStatus = await checkLicenseAndLogout();
         
-        if (serversJson) {
-          setServers(JSON.parse(serversJson));
+        if (licenseStatus.shouldLogout) {
+          console.log('🚫 Lisans geçersiz, sayfa yüklenmesi durduruluyor');
+          return; // Logout oldu, işlemi durdur
         }
         
+        // Get expiry info from storage
+        const expiry = await AsyncStorage.getItem('vpn_expiry');
         if (expiry) {
           setExpiryDays(expiry);
+        }
+        
+        // Get servers from backend API
+        const response = await fetch(`${API_URL}/servers`);
+        if (response.ok) {
+          const serverData = await response.json();
+          setServers(serverData);
+        } else {
+          console.error('Failed to fetch servers:', response.status);
         }
         
         setLoading(false);
@@ -40,7 +58,29 @@ export default function ServersScreen() {
     };
 
     loadServers();
+    
+    // Periyodik lisans kontrolü başlat (5 dakikada bir)
+    const monitoringInterval = startLicenseMonitoring(5);
+    
+    // Cleanup function
+    return () => {
+      if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+        console.log('📋 Lisans izleme durduruldu');
+      }
+    };
   }, []);
+
+  // Sayfa odaklandığında lisans kontrol et
+  useFocusEffect(
+    React.useCallback(() => {
+      const checkOnFocus = async () => {
+        await checkLicenseOnFocus();
+      };
+      checkOnFocus();
+      return () => {};
+    }, [])
+  );
 
   const handleServerSelect = async (server: Server) => {
     // Store the selected server
@@ -54,16 +94,16 @@ export default function ServersScreen() {
     router.push('/settings');
   };
 
-  const getSpeedIcon = (speed: string) => {
-    switch(speed) {
-      case 'high':
-        return <Text style={{ fontSize: 16, color: '#10B981' }}>📶</Text>;
-      case 'medium':
-        return <Text style={{ fontSize: 16, color: '#F59E0B' }}>📶</Text>;
-      case 'low':
-        return <Text style={{ fontSize: 16, color: '#EF4444' }}>📶</Text>;
+  const getStatusIcon = (status: string) => {
+    switch(status) {
+      case 'online':
+        return <Text style={{ fontSize: 16, color: '#10B981' }}>🟢</Text>;
+      case 'maintenance':
+        return <Text style={{ fontSize: 16, color: '#F59E0B' }}>🟡</Text>;
+      case 'offline':
+        return <Text style={{ fontSize: 16, color: '#EF4444' }}>🔴</Text>;
       default:
-        return <Text style={{ fontSize: 16, color: '#64748B' }}>📶</Text>;
+        return <Text style={{ fontSize: 16, color: '#64748B' }}>⚫</Text>;
     }
   };
 
@@ -81,11 +121,17 @@ export default function ServersScreen() {
         
         <View style={styles.serverDetails}>
           <View style={styles.serverDetail}>
-            {getSpeedIcon(item.speed)}
+            {getStatusIcon(item.status)}
             <Text style={styles.serverDetailText}>
-              {item.speed === 'high' ? 'Yüksek' : item.speed === 'medium' ? 'Orta' : 'Düşük'} Hız
+              {item.status === 'online' ? 'Çevrimiçi' : item.status === 'maintenance' ? 'Bakım' : 'Çevrimdışı'}
             </Text>
           </View>
+          {item.users_count !== undefined && (
+            <View style={styles.serverDetail}>
+              <Text style={{ fontSize: 16, color: '#64748B' }}>👥</Text>
+              <Text style={styles.serverDetailText}>{item.users_count} kullanıcı</Text>
+            </View>
+          )}
         </View>
       </View>
       <Text style={{ fontSize: 20, color: '#64748B' }}>→</Text>
