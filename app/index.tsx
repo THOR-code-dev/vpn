@@ -118,10 +118,6 @@ export default function WelcomeScreen() {
               {isConnected ? 'Bağlantıyı Kes' : 'Bağlan'}
             </Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.button, styles.adminButton]} onPress={() => router.push('admin' as any)}>
-            <Text style={styles.buttonText}>Admin Panel</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>
