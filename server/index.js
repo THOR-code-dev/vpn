@@ -959,9 +959,12 @@ app.delete('/api/purchase-requests/:id', async (req, res) => {
   }
 });
 
-// Initialize database and start server
-// initializeDatabase().then(() => { // This line is removed as per the new_code
+// Export for Vercel serverless function
+module.exports = app;
+
+// Initialize database and start server (only for local development)
+if (require.main === module) {
   app.listen(port, () => {
     console.log(`Server running on port ${port}`);
   });
-// }); 
+} 
