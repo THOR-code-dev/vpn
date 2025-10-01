@@ -94,12 +94,18 @@ ALTER TABLE vpn_servers ENABLE ROW LEVEL SECURITY;
 -- ==========================================
 -- Public read access for license validation
 CREATE POLICY "licenses_select_policy" ON licenses FOR SELECT USING (true);
+-- Admin full access for licenses
+CREATE POLICY "licenses_admin_policy" ON licenses FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- Public read access for VPN servers
 CREATE POLICY "vpn_servers_select_policy" ON vpn_servers FOR SELECT USING (true);
+-- Admin full access for servers
+CREATE POLICY "vpn_servers_admin_policy" ON vpn_servers FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- Users can read their own data
 CREATE POLICY "users_select_policy" ON users FOR SELECT USING (auth.jwt() ->> 'email' = email);
+-- Admin full access for users
+CREATE POLICY "users_admin_policy" ON users FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ==========================================
 -- DATABASE READY! ✅
